@@ -7,7 +7,7 @@
     "react-dom": "^18.2.0",
     "lucide-react": "^0.383.0",
     "firebase": "^10.7.0"
-  }
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
