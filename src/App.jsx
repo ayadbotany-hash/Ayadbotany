@@ -6,7 +6,8 @@ import {
 import {
   Clock, Camera, X, Search, MapPin, FileText, Loader2, CheckCircle2, LogOut, UserPlus, Trash2,
   Settings, Eye, EyeOff, Lock, User, Star, BarChart3, ChevronDown, ChevronUp, Building2, Receipt,
-  Wallet, FileBarChart, Users, Plus
+  Wallet, FileBarChart, Users, Plus,
+  GraduationCap, ShieldCheck, Pill, Headset, AlertTriangle, Circle
 } from 'lucide-react';
 
 // ---------- Firebase setup ----------
@@ -27,9 +28,11 @@ const EMPLOYEES_COL = 'employees';
 const VISITS_COL = 'visits';
 const PHARMACIES_COL = 'pharmacies';
 const EXPENSES_COL = 'expenses';
+const SUPERVISOR_VISITS_COL = 'supervisor_visits';
+const COMPLAINTS_COL = 'complaints';
 const SESSION_KEY = 'pharmatrack_session';
 
-const ROLE_LABELS = { owner: 'اونر', admin: 'ادمن', supervisor: 'مشرف', manager: 'مدير صيدلية', employee: 'موظف ميداني' };
+const ROLE_LABELS = { owner: 'اونر', admin: 'ادمن', supervisor: 'HR', manager: 'مدير صيدلية', employee: 'موظف ميداني', store_employee: 'موظف صيدلية' };
 
 function useNow() {
   const [now, setNow] = useState(new Date());
@@ -48,6 +51,512 @@ function monthLabelOf(key) {
   const d = new Date(Number(y), Number(m) - 1, 1);
   return d.toLocaleDateString('ar-IQ', { year: 'numeric', month: 'long' });
 }
+
+/* ============================================================
+   TRAINING MODULE — added as a self-contained, additive feature.
+   Nothing above this block or in PharmaTrack() below was changed
+   except: the icon import list, one tile in owner_home, and three
+   small navigation buttons + one screen route near the bottom.
+   ============================================================ */
+
+const TRAINING_COLORS = {
+  pine: "#1F3D2B", pineDeep: "#14231A", sand: "#F6F1E7", sandCard: "#FFFFFF",
+  gold: "#C99A3B", goldSoft: "#EFD9A8", muted: "#6B7A6E", danger: "#B23A3A",
+};
+
+const TRAINING_LEVELS = [
+  { id: 1, label: "متدرب", min: 0, color: "#8B8368", bg: "#EFEAE0" },
+  { id: 2, label: "مؤهل", min: 21, color: "#7A8B4E", bg: "#EAEEDD" },
+  { id: 3, label: "متمرس", min: 51, color: TRAINING_COLORS.pine, bg: "#E4EEE4" },
+  { id: 4, label: "خبير فرع", min: 81, color: "#8A6A1F", bg: TRAINING_COLORS.goldSoft },
+];
+const TRAINING_CERTIFIED_LEVEL = { id: 5, label: "مدرّب معتمد", color: "#fff", bg: TRAINING_COLORS.pine };
+
+function trainingGetLevel(percent, certified) {
+  if (certified) return TRAINING_CERTIFIED_LEVEL;
+  return [...TRAINING_LEVELS].reverse().find((l) => percent >= l.min) ?? TRAINING_LEVELS[0];
+}
+
+function TrainingLevelBadge({ percent, certified, size = "sm" }) {
+  const lvl = trainingGetLevel(percent, certified);
+  const isTop = lvl.id === 5;
+  return (
+    <span style={{
+      background: isTop ? TRAINING_COLORS.pine : lvl.bg,
+      color: isTop ? "#fff" : lvl.color,
+      fontSize: size === "sm" ? 11 : 12.5, fontWeight: 700,
+      padding: size === "sm" ? "3px 9px" : "5px 12px", borderRadius: 999,
+      whiteSpace: "nowrap", fontFamily: "inherit",
+    }}>
+      {isTop && "★ "}مستوى {lvl.id} · {lvl.label}
+    </span>
+  );
+}
+
+function TrainingProgressRing({ percent, size = 46, stroke = 5, color = TRAINING_COLORS.gold }) {
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const offset = c - (percent / 100) * c;
+  return (
+    <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+      <circle cx={size / 2} cy={size / 2} r={r} stroke="#E8E1D0" strokeWidth={stroke} fill="none" />
+      <circle cx={size / 2} cy={size / 2} r={r} stroke={color} strokeWidth={stroke} fill="none"
+        strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round"
+        style={{ transition: "stroke-dashoffset 0.6s ease" }} />
+      <text x="50%" y="50%" textAnchor="middle" dy="0.32em" fontSize={size * 0.28} fontWeight="700"
+        fill={TRAINING_COLORS.pineDeep} style={{ transform: "rotate(90deg)", transformOrigin: "center" }}>
+        {percent}%
+      </text>
+    </svg>
+  );
+}
+
+function TrainingStatusBadge({ status }) {
+  const map = {
+    done: { label: "مكتمل", bg: "#E4EEE4", color: TRAINING_COLORS.pine },
+    active: { label: "قيد التنفيذ", bg: TRAINING_COLORS.goldSoft, color: "#8A6A1F" },
+    locked: { label: "غير متاح بعد", bg: "#EFEAE0", color: TRAINING_COLORS.muted },
+  };
+  const s = map[status];
+  return (
+    <span style={{ background: s.bg, color: s.color, fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 999, whiteSpace: "nowrap" }}>
+      {s.label}
+    </span>
+  );
+}
+
+const CONTROLLED_DRUGS = [
+  { name: "ALFENTANIL", list: 1 }, { name: "ALPRAZOLAM", list: 8 },
+  { name: "AMFEPRAMONE (diethylpropion)", list: 8 }, { name: "AMFETAMINE", list: 1 },
+  { name: "AMOBARBITAL", list: 7 }, { name: "BARBITAL", list: 8 },
+  { name: "BENZFETAMINE (Benzphetamine)", list: 8 }, { name: "BENZHEXOL (ARTANE)", list: 5 },
+  { name: "BEZITRAMIDE", list: 1 }, { name: "BROMAZEPAM", list: 8 },
+  { name: "BROTIZOLAM", list: 8 }, { name: "BUPRENORPHINE", list: 7 },
+  { name: "BUTALBITAL", list: 7 }, { name: "BUTOBARBITAL (butobarbita)", list: 8 },
+  { name: "CAMAZEPAM", list: 8 }, { name: "Carbamazepine", list: null },
+  { name: "CATHINE (+)- norpseudoephedrine", list: 7 }, { name: "CHLORDIAZEPOXIDE", list: 8 },
+  { name: "CLOBAZAM", list: 8 }, { name: "CLONAZEPAM", list: 8 },
+  { name: "CLORAZEPATE", list: 8 }, { name: "CLOXAZOLAM", list: 8 },
+  { name: "CODEINE", list: 2 }, { name: "DELORAZEPAM", list: 8 },
+  { name: "DEXAMFETAMINE", list: 1 }, { name: "DIAZEPAM", list: 8 },
+  { name: "DIFENOXIN", list: 1 }, { name: "DIHYDROCODEINE", list: 2 },
+  { name: "DIPHENOXYLATE", list: 1 }, { name: "DRONABINOL (THC isomers)", list: 1 },
+  { name: "Ephedrine", list: 9 }, { name: "Ergometrine", list: 9 },
+  { name: "Ergotamine", list: 9 }, { name: "ESTAZOLAM", list: 8 },
+  { name: "ETHYLMORPHINE", list: 2 }, { name: "Etizolam", list: 8 },
+  { name: "FENPROPOREX", list: 8 }, { name: "FENTANYL", list: 1 },
+  { name: "Fualprazolam", list: 8 }, { name: "FLUDIAZEPAM", list: 8 },
+  { name: "FLUNITRAZEPAM", list: 7 }, { name: "FLURAZEPAM", list: 8 },
+  { name: "gabapentine", list: null }, { name: "GHB", list: 8 },
+  { name: "HALOXAZOLAM", list: 8 }, { name: "HYDROCODONE", list: 1 },
+  { name: "HYDROMORPHONE", list: 1 }, { name: "KETAZOLAM", list: 8 },
+  { name: "Levomethamphetamine", list: 1 }, { name: "LEVORPHANOL", list: 1 },
+  { name: "LOPRAZOLAM", list: 8 }, { name: "LORAZEPAM", list: 8 },
+  { name: "LORMETAZEPAM", list: 8 }, { name: "MAZINDOL", list: 8 },
+  { name: "MEDAZEPAM", list: 8 }, { name: "MEPROBAMATE", list: 8 },
+  { name: "MESOCARB", list: 8 }, { name: "METHADONE", list: 1 },
+  { name: "METHYLAMPHETAMINE", list: 1 }, { name: "METHYLPHENIDATE", list: 6 },
+  { name: "METHYLPHENOBARBITAL", list: 8 }, { name: "METHYPRYLON", list: 8 },
+  { name: "MIDAZOLAM", list: 8 }, { name: "MORPHINE", list: 1 },
+  { name: "NIMETAZEPAM", list: 8 }, { name: "NITRAZEPAM", list: 8 },
+  { name: "NORDAZEPAM", list: 8 }, { name: "OXAZEPAM", list: 8 },
+  { name: "OXAZOLAM", list: 8 }, { name: "OXYCODONE", list: 1 },
+  { name: "PENTAZOCINE", list: 7 }, { name: "PENTOBARBITAL", list: 7 },
+  { name: "PETHIDINE", list: 1 }, { name: "PHENDIMETRAZINE", list: 8 },
+  { name: "PHENOBARBITAL", list: 8 }, { name: "PHENTERMINE", list: 8 },
+  { name: "PHOLCODINE", list: 2 }, { name: "PINAZEPAM", list: 8 },
+  { name: "PIRITRAMIDE", list: 1 }, { name: "PRAZEPAM", list: 8 },
+  { name: "Pregabalin", list: null }, { name: "Pseudoephedrine", list: 9 },
+  { name: "REMIFENTANIL", list: 1 }, { name: "SECBUTABARBITAL", list: 8 },
+  { name: "SUFENTANIL", list: 1 }, { name: "TEMAZEPAM", list: 8 },
+  { name: "TETRAZEPAM", list: 8 }, { name: "TILIDINE", list: 1 },
+  { name: "Tramdol", list: 1 }, { name: "TRIAZOLAM", list: 8 },
+  { name: "Trihexphenidyl", list: null }, { name: "Tropicamide (mydrapid)", list: 7 },
+  { name: "VINYLBITAL", list: 8 }, { name: "ZOLPIDEM", list: 8 },
+];
+
+function ControlledDrugsList() {
+  const [q, setQ] = useState("");
+  const filtered = CONTROLLED_DRUGS.filter((d) => d.name.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <div style={{ marginTop: 4 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: "#F6E4E1", border: `1px solid ${TRAINING_COLORS.danger}`, borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
+        <AlertTriangle size={16} color={TRAINING_COLORS.danger} style={{ flexShrink: 0, marginTop: 1 }} />
+        <div style={{ fontSize: 12.5, color: TRAINING_COLORS.danger, fontWeight: 600, lineHeight: 1.6 }}>
+          أي دواء من هذه القائمة يُصرف من الصيدلية لازم يتوثق فوراً بنظام PharmaTrack — بدون استثناء.
+        </div>
+      </div>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="دور على اسم دواء..."
+        style={{ width: "100%", padding: "9px 12px", borderRadius: 10, border: "1px solid #E3DCC9", fontSize: 13, marginBottom: 8, boxSizing: "border-box" }} />
+      <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid #EFE9DA", borderRadius: 10 }}>
+        {filtered.length === 0 ? (
+          <div style={{ padding: 12, fontSize: 12.5, color: TRAINING_COLORS.muted }}>ما لكيت نتيجة</div>
+        ) : (
+          filtered.map((d, i) => (
+            <div key={d.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", borderBottom: i === filtered.length - 1 ? "none" : "1px solid #F2EEE1" }}>
+              <span style={{ fontSize: 12.5, color: TRAINING_COLORS.pineDeep }}>{d.name}</span>
+              {d.list && <span style={{ fontSize: 10.5, color: TRAINING_COLORS.muted, background: "#F2EEE1", padding: "2px 7px", borderRadius: 999 }}>قائمة {d.list}</span>}
+            </div>
+          ))
+        )}
+      </div>
+      <div style={{ fontSize: 11, color: TRAINING_COLORS.muted, marginTop: 6 }}>{CONTROLLED_DRUGS.length} دواء مسجل بالقائمة</div>
+    </div>
+  );
+}
+
+const TRAINING_SERVICE_STANDARDS = [
+  { title: "الترحيب", text: "استقبال المريض بابتسامة وترحيب واضح فور دخوله." },
+  { title: "الاستماع للمريض", text: "إذا المريض يحتاج علاج، لازم تقعده وتسمع منو قبل أي شي." },
+  { title: "لغة الجسد أثناء الشرح", text: "رفع اليد أثناء الشرح والتواصل البصري (Eye Contact) مع المريض." },
+  { title: "التعامل مع الشكاوى", text: "تعتذر من المريض وتطلب السماح أولاً، وبعدها تحوّل الموضوع لمدير الصيدلية." },
+  { title: "التعامل مع مريض غاضب", text: "نفس الأسلوب: اعتذار أولاً، ثم تحويله لمدير الصيدلية." },
+  { title: "تأخير صرف العلاج", text: "لازم تعتذر من المريض فوراً عن أي تأخير بالصرف." },
+  { title: "فلسفة العمل", text: "المريض على حق دائماً، والمريض هو عائلتنا." },
+  { title: "نبرة الصوت", text: "صوت الموظف لازم يكون واضح ومسموع بشكل جيد." },
+  { title: "إعلام المراجع بالخدمات", text: "لازم تعلم المراجع بوجود المختبر والدليفري أو أي عرض ثاني متوفر." },
+];
+
+function ServiceStandardsList() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {TRAINING_SERVICE_STANDARDS.map((s, i) => (
+        <div key={s.title} style={{ display: "flex", gap: 10, alignItems: "flex-start", background: "#FAF7EF", border: "1px solid #EFE9DA", borderRadius: 10, padding: "10px 12px" }}>
+          <div style={{ width: 22, height: 22, borderRadius: "50%", background: TRAINING_COLORS.pine, color: "#fff", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{i + 1}</div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: TRAINING_COLORS.pineDeep }}>{s.title}</div>
+            <div style={{ fontSize: 12.5, color: TRAINING_COLORS.muted, marginTop: 2, lineHeight: 1.7 }}>{s.text}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const DRUG_BANK = [
+  { trade: "بنادول", generic: "Paracetamol", group: "مسكنات ومضادات حرارة" },
+  { trade: "بروفين", generic: "Ibuprofen", group: "مضادات التهاب غير ستيرويدية (NSAIDs)" },
+  { trade: "أوغمنتين", generic: "Amoxicillin + Clavulanic acid", group: "مضادات حيوية - بنسلينات" },
+  { trade: "أموكسيل", generic: "Amoxicillin", group: "مضادات حيوية - بنسلينات" },
+  { trade: "زيثروماكس", generic: "Azithromycin", group: "مضادات حيوية - ماكروليدات" },
+  { trade: "نيكسيوم", generic: "Esomeprazole", group: "مثبطات مضخة البروتون (PPI)" },
+  { trade: "لوسك", generic: "Omeprazole", group: "مثبطات مضخة البروتون (PPI)" },
+  { trade: "ليبيتور", generic: "Atorvastatin", group: "خافضات الكوليسترول (ستاتين)" },
+  { trade: "كلوكوفاج", generic: "Metformin", group: "أدوية السكري (بايغوانيد)" },
+  { trade: "كونكور", generic: "Bisoprolol", group: "حاصرات بيتا" },
+  { trade: "فولتارين", generic: "Diclofenac", group: "مضادات التهاب غير ستيرويدية (NSAIDs)" },
+  { trade: "فينتولين", generic: "Salbutamol", group: "موسعات قصبية" },
+  { trade: "كلاريتين", generic: "Loratadine", group: "مضادات الهيستامين" },
+  { trade: "أسبوسيد", generic: "Acetylsalicylic acid (Aspirin)", group: "مسكنات ومضادات تجلط" },
+];
+
+function trainingShuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }
+function trainingNormalize(s) { return s.trim().toLowerCase(); }
+const TRAINING_DAILY_LIMIT = 10;
+
+function TradeNameGame({ onComplete }) {
+  const [order] = useState(() => trainingShuffle(DRUG_BANK));
+  const [idx, setIdx] = useState(0);
+  const [answeredToday, setAnsweredToday] = useState(0);
+  const [genericInput, setGenericInput] = useState("");
+  const [groupInput, setGroupInput] = useState("");
+  const [checked, setChecked] = useState(false);
+
+  const current = order[idx % order.length];
+  const doneForToday = answeredToday >= TRAINING_DAILY_LIMIT;
+  const genericCorrect = checked && trainingNormalize(genericInput) !== "" && trainingNormalize(current.generic).includes(trainingNormalize(genericInput));
+  const groupCorrect = checked && trainingNormalize(groupInput) !== "" && trainingNormalize(current.group).includes(trainingNormalize(groupInput));
+
+  function submit() { setChecked(true); }
+  function next() {
+    setChecked(false); setGenericInput(""); setGroupInput("");
+    setAnsweredToday((n) => n + 1); setIdx((i) => i + 1);
+  }
+
+  if (doneForToday) {
+    return (
+      <div style={{ background: "#FAF7EF", border: "1px solid #EFE9DA", borderRadius: 12, padding: "18px 14px", textAlign: "center" }}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: TRAINING_COLORS.pineDeep }}>خلصت أسئلة اليوم ({TRAINING_DAILY_LIMIT}/{TRAINING_DAILY_LIMIT}) ✓</div>
+        <div style={{ fontSize: 12, color: TRAINING_COLORS.muted, marginTop: 4 }}>عاود غداً لأسئلة جديدة.</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, marginTop: 10, fontSize: 11, color: TRAINING_COLORS.muted }}>
+          <Lock size={11} /> النتيجة تُرسل تلقائياً لـ Owner و Admin فقط
+        </div>
+        {onComplete && (
+          <button onClick={onComplete} style={{ marginTop: 12, background: TRAINING_COLORS.pine, color: "#fff", border: "none", padding: "9px 20px", borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+            تم — الانتقال للموديول التالي
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 11.5, color: TRAINING_COLORS.muted, marginBottom: 10 }}>سؤال {answeredToday + 1} من {TRAINING_DAILY_LIMIT} اليوم</div>
+      <div style={{ background: TRAINING_COLORS.pine, borderRadius: 14, padding: "18px 16px", textAlign: "center", marginBottom: 12 }}>
+        <div style={{ fontSize: 11.5, color: "#CFE0D2" }}>الاسم التجاري</div>
+        <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", marginTop: 4 }}>{current.trade}</div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 12, color: TRAINING_COLORS.muted, marginBottom: 4 }}>الاسم العلمي</div>
+          <input value={genericInput} onChange={(e) => setGenericInput(e.target.value)} disabled={checked} placeholder="اكتب الاسم العلمي..."
+            style={{ width: "100%", padding: "9px 12px", borderRadius: 10, border: `1.5px solid ${checked ? (genericCorrect ? TRAINING_COLORS.pine : TRAINING_COLORS.danger) : "#E3DCC9"}`, background: checked ? (genericCorrect ? "#E4EEE4" : "#F6E4E1") : "#fff", fontSize: 13, boxSizing: "border-box" }} />
+        </div>
+        <div>
+          <div style={{ fontSize: 12, color: TRAINING_COLORS.muted, marginBottom: 4 }}>المجموعة الدوائية</div>
+          <input value={groupInput} onChange={(e) => setGroupInput(e.target.value)} disabled={checked} placeholder="اكتب المجموعة الدوائية..."
+            style={{ width: "100%", padding: "9px 12px", borderRadius: 10, border: `1.5px solid ${checked ? (groupCorrect ? TRAINING_COLORS.pine : TRAINING_COLORS.danger) : "#E3DCC9"}`, background: checked ? (groupCorrect ? "#E4EEE4" : "#F6E4E1") : "#fff", fontSize: 13, boxSizing: "border-box" }} />
+        </div>
+      </div>
+      {checked && (
+        <div style={{ marginTop: 12, background: "#FAF7EF", border: "1px solid #EFE9DA", borderRadius: 10, padding: "10px 12px", fontSize: 12.5, color: TRAINING_COLORS.pineDeep, lineHeight: 1.8 }}>
+          <div><strong>الجواب الصحيح — الاسم العلمي:</strong> {current.generic}</div>
+          <div><strong>المجموعة الدوائية:</strong> {current.group}</div>
+        </div>
+      )}
+      <button onClick={checked ? next : submit} disabled={!checked && !genericInput && !groupInput}
+        style={{ marginTop: 12, width: "100%", background: TRAINING_COLORS.gold, color: "#fff", border: "none", padding: "10px 0", borderRadius: 999, fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: !checked && !genericInput && !groupInput ? 0.5 : 1 }}>
+        {checked ? "السؤال التالي" : "تحقق من الجواب"}
+      </button>
+    </div>
+  );
+}
+
+function ComplaintBox({ employeeName, pharmacy }) {
+  const [text, setText] = useState("");
+  const [sent, setSent] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function submit() {
+    if (!text.trim()) return;
+    setSubmitting(true);
+    setErr("");
+    try {
+      await addDoc(collection(db, COMPLAINTS_COL), {
+        text: text.trim(),
+        employeeName: employeeName || 'غير معروف',
+        pharmacy: pharmacy || '',
+        timestamp: Date.now(),
+        dateLabel: formatDate(new Date()),
+        timeLabel: formatTime(new Date()),
+      });
+      setSent(true);
+    } catch (e) {
+      setErr('صار خطأ، جرب مرة ثانية');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (sent) {
+    return (
+      <div style={{ background: "#E4EEE4", border: `1px solid ${TRAINING_COLORS.pine}`, borderRadius: 12, padding: "16px 14px", textAlign: "center" }}>
+        <CheckCircle2 size={22} color={TRAINING_COLORS.pine} style={{ marginBottom: 6 }} />
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: TRAINING_COLORS.pineDeep }}>توصلت الشكوى ✓</div>
+        <div style={{ fontSize: 12, color: TRAINING_COLORS.muted, marginTop: 4, lineHeight: 1.7 }}>راح تظهر عند: مدير الصيدلية، HR، والأدمن المسؤولين عن صيدليتك.</div>
+        <button onClick={() => { setSent(false); setText(""); }} style={{ marginTop: 10, background: "transparent", border: `1px solid ${TRAINING_COLORS.pine}`, color: TRAINING_COLORS.pine, padding: "7px 16px", borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+          إرسال شكوى ثانية
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div>
+      {!pharmacy && (
+        <div style={{ marginBottom: 8, fontSize: 11.5, color: TRAINING_COLORS.danger, background: "#F6E4E1", padding: "8px 10px", borderRadius: 8 }}>
+          حسابك ما مرتبط بصيدلية محددة — تواصل مع الإدارة قبل إرسال الشكوى.
+        </div>
+      )}
+      <div style={{ fontSize: 12.5, color: TRAINING_COLORS.muted, marginBottom: 8, lineHeight: 1.7 }}>إذا عندك شكوى بالعمل، اكتبها هنا وترسل مباشرة.</div>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="اكتب الشكوى هنا..." rows={4}
+        style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #E3DCC9", fontSize: 13, resize: "vertical", boxSizing: "border-box" }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8, fontSize: 11, color: TRAINING_COLORS.muted }}>
+        <Lock size={11} /> تظهر فقط عند: مدير الصيدلية، HR، الأدمن المسؤولين عن صيدليتك
+      </div>
+      {err && <div style={{ color: TRAINING_COLORS.danger, fontSize: 12, marginTop: 6 }}>{err}</div>}
+      <button onClick={submit} disabled={!text.trim() || submitting}
+        style={{ marginTop: 10, width: "100%", background: TRAINING_COLORS.pine, color: "#fff", border: "none", padding: "10px 0", borderRadius: 999, fontSize: 13, fontWeight: 700, cursor: text.trim() ? "pointer" : "not-allowed", opacity: text.trim() ? 1 : 0.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+        {submitting ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : null}
+        إرسال الشكوى
+      </button>
+    </div>
+  );
+}
+
+const TRAINING_MODULES = [
+  { id: "tm1", icon: Building2, title: "التعريف بالمؤسسة", type: "info", infoText: "", status: "done" },
+  { id: "tm2", icon: ShieldCheck, title: "بروتوكول استعمال السستم والكاشير", type: "info", infoText: "", status: "done" },
+  { id: "tm3", icon: Pill, title: "التعامل مع الأدوية الخاضعة للرقابة", type: "info", controlledDrugs: true, status: "done" },
+  { id: "tm4", icon: Headset, title: "معايير خدمة العملاء", type: "info", standards: true, status: "locked" },
+  { id: "tm5", icon: FileText, title: "الأسماء التجارية والعلمية للأدوية", type: "info", drugGame: true, status: "locked" },
+  { id: "tm6", icon: AlertTriangle, title: "رفع شكوى بالعمل", type: "info", complaintBox: true, status: "locked" },
+];
+
+function TrainingQuizPanel({ quiz, onFinish }) {
+  const [answered, setAnswered] = useState(null);
+  const question = quiz[0];
+  return (
+    <div style={{ padding: "14px 4px 4px" }}>
+      <div style={{ fontWeight: 700, fontSize: 14, color: TRAINING_COLORS.pineDeep, marginBottom: 10 }}>{question.q}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {question.options.map((opt, i) => {
+          const isCorrect = i === question.correct;
+          const isChosen = answered === i;
+          let bg = "#FFFFFF"; let border = "#E3DCC9";
+          if (answered !== null && isChosen) { bg = isCorrect ? "#E4EEE4" : "#F6E4E1"; border = isCorrect ? TRAINING_COLORS.pine : TRAINING_COLORS.danger; }
+          else if (answered !== null && isCorrect) { bg = "#E4EEE4"; border = TRAINING_COLORS.pine; }
+          return (
+            <button key={i} onClick={() => answered === null && setAnswered(i)}
+              style={{ textAlign: "right", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${border}`, background: bg, fontSize: 13.5, color: TRAINING_COLORS.pineDeep, cursor: answered === null ? "pointer" : "default" }}>
+              {opt}
+            </button>
+          );
+        })}
+      </div>
+      {answered !== null && (
+        <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 12.5, color: answered === question.correct ? TRAINING_COLORS.pine : TRAINING_COLORS.danger, fontWeight: 600 }}>
+            {answered === question.correct ? "إجابة صحيحة ✓" : "إجابة غير دقيقة — راجع الدرس"}
+          </span>
+          <button onClick={onFinish} style={{ background: TRAINING_COLORS.pine, color: "#fff", border: "none", padding: "8px 16px", borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+            إنهاء الموديول
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TrainingPath({ currentUser }) {
+  const [modules, setModules] = useState(TRAINING_MODULES);
+  const [openId, setOpenId] = useState("tm3");
+
+  const doneCount = modules.filter((m) => m.status === "done").length;
+  const overall = Math.round((doneCount / modules.length) * 100);
+
+  function completeModule(id) {
+    setModules((prev) =>
+      prev.map((m, idx) => {
+        if (m.id === id) return { ...m, status: "done" };
+        const nextIdx = prev.findIndex((x) => x.id === id) + 1;
+        if (idx === nextIdx && m.status === "locked") return { ...m, status: "active" };
+        return m;
+      })
+    );
+    const idx = modules.findIndex((m) => m.id === id);
+    setOpenId(modules[idx + 1]?.id ?? null);
+  }
+
+  return (
+    <div>
+      <div style={{ background: TRAINING_COLORS.pine, borderRadius: 18, padding: "18px 18px", color: "#fff", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <div style={{ fontSize: 13, opacity: 0.75 }}>مسار التدريب</div>
+          <div style={{ marginTop: 8 }}><TrainingLevelBadge percent={overall} size="md" /></div>
+        </div>
+        <TrainingProgressRing percent={overall} color={TRAINING_COLORS.gold} size={54} />
+      </div>
+
+      <div style={{ position: "relative", paddingRight: 22 }}>
+        <div style={{ position: "absolute", right: 9, top: 10, bottom: 10, width: 2, background: "repeating-linear-gradient(to bottom, #D9CFB2 0, #D9CFB2 6px, transparent 6px, transparent 12px)" }} />
+        {modules.map((m) => {
+          const Icon = m.icon;
+          const isOpen = openId === m.id;
+          const locked = m.status === "locked";
+          return (
+            <div key={m.id} style={{ position: "relative", marginBottom: 14 }}>
+              <div style={{ position: "absolute", right: 0, top: 18, width: 20, height: 20, borderRadius: "50%", background: m.status === "done" ? TRAINING_COLORS.pine : m.status === "active" ? TRAINING_COLORS.gold : "#E3DCC9", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {m.status === "done" ? <CheckCircle2 size={14} color="#fff" /> : m.status === "locked" ? <Lock size={11} color="#8B8368" /> : <Circle size={10} color="#fff" fill="#fff" />}
+              </div>
+              <div style={{ marginRight: 32, background: TRAINING_COLORS.sandCard, borderRadius: 16, border: locked ? "1px solid #ECE6D6" : "1px solid #E3DCC9", opacity: locked ? 0.6 : 1, boxShadow: isOpen ? "0 4px 18px rgba(31,61,43,0.08)" : "none" }}>
+                <button onClick={() => !locked && setOpenId(isOpen ? null : m.id)} disabled={locked}
+                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "13px 14px", background: "transparent", border: "none", cursor: locked ? "not-allowed" : "pointer" }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 10, background: TRAINING_COLORS.sand, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <Icon size={17} color={TRAINING_COLORS.pine} />
+                  </div>
+                  <div style={{ flex: 1, textAlign: "right" }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: TRAINING_COLORS.pineDeep }}>{m.title}</div>
+                  </div>
+                  {m.type === "info" ? (
+                    <span style={{ background: "#EFEAE0", color: TRAINING_COLORS.muted, fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 999, whiteSpace: "nowrap" }}>معلومة</span>
+                  ) : (
+                    <TrainingStatusBadge status={m.status} />
+                  )}
+                  {!locked && <ChevronDown size={16} color={TRAINING_COLORS.muted} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />}
+                </button>
+                {isOpen && !locked && (
+                  <div style={{ borderTop: "1px solid #EFE9DA", padding: "0 14px 14px" }}>
+                    {m.controlledDrugs ? (
+                      <div style={{ padding: "14px 4px 4px" }}><ControlledDrugsList /></div>
+                    ) : m.standards ? (
+                      <div style={{ padding: "14px 4px 4px" }}>
+                        <ServiceStandardsList />
+                        {m.status !== "done" && (
+                          <button onClick={() => completeModule(m.id)} style={{ marginTop: 14, width: "100%", background: TRAINING_COLORS.pine, color: "#fff", border: "none", padding: "10px 0", borderRadius: 999, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                            تم
+                          </button>
+                        )}
+                      </div>
+                    ) : m.drugGame ? (
+                      <div style={{ padding: "14px 4px 4px" }}>
+                        <TradeNameGame onComplete={m.status !== "done" ? () => completeModule(m.id) : null} />
+                      </div>
+                    ) : m.complaintBox ? (
+                      <div style={{ padding: "14px 4px 4px" }}>
+                        <ComplaintBox employeeName={currentUser?.name} pharmacy={(currentUser?.pharmacies || [])[0]} />
+                      </div>
+                    ) : (
+                      <div style={{ padding: "14px 4px 4px", fontSize: 13.5, lineHeight: 1.8, color: m.infoText ? TRAINING_COLORS.pineDeep : TRAINING_COLORS.muted, fontStyle: m.infoText ? "normal" : "italic" }}>
+                        {m.infoText || "— لسه ما انحط النص، تكدر تضيفه بالكود (infoText) —"}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TrainingOverviewForManagers({ employees }) {
+  const fieldEmployees = employees.filter((e) => e.role === 'employee');
+  return (
+    <div>
+      <div style={{ background: "#FAF7EF", border: "1px solid #EFE9DA", borderRadius: 12, padding: "14px", marginBottom: 16, fontSize: 12.5, color: TRAINING_COLORS.muted, lineHeight: 1.7 }}>
+        هذا عرض مبدئي لقائمة الموظفين. تتبع تقدم كل موظف تلقائياً (نسبة الإكمال، المستوى، النتائج) سيُفعّل عند ربط هذا الموديول بقاعدة بيانات Firestore.
+      </div>
+      {fieldEmployees.length === 0 ? (
+        <div style={{ textAlign: "center", color: TRAINING_COLORS.muted, fontSize: 13.5, padding: "40px 10px" }}>ما اكو موظفين ميدانيين مسجلين بعد</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {fieldEmployees.map((e) => (
+            <div key={e.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", border: "1.5px solid #E5E9E6", borderRadius: 12, background: "#fafcfb" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: TRAINING_COLORS.pineDeep }}>{e.name}</div>
+              <TrainingLevelBadge percent={0} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TrainingScreen({ currentUser, role, employees }) {
+  return (
+    <div style={{ padding: "18px 20px 40px" }}>
+      {(role === 'employee' || role === 'store_employee') ? <TrainingPath currentUser={currentUser} /> : <TrainingOverviewForManagers employees={employees} />}
+    </div>
+  );
+}
+
+/* ============================================================
+   END TRAINING MODULE ADDITIONS
+   ============================================================ */
 
 export default function PharmaTrack() {
   const [booting, setBooting] = useState(true);
@@ -88,6 +597,9 @@ export default function PharmaTrack() {
   const [resetTargetId, setResetTargetId] = useState(null);
   const [resetPassValue, setResetPassValue] = useState('');
   const [resetMsg, setResetMsg] = useState('');
+  const [transferTargetId, setTransferTargetId] = useState(null);
+  const [transferValue, setTransferValue] = useState('');
+  const [transferMsg, setTransferMsg] = useState('');
 
   // pharmacy management
   const [newPharmacyName, setNewPharmacyName] = useState('');
@@ -104,6 +616,19 @@ export default function PharmaTrack() {
   const [expPhoto, setExpPhoto] = useState(null);
   const [expSubmitting, setExpSubmitting] = useState(false);
   const [expErr, setExpErr] = useState('');
+
+  // supervisor visit report (new, separate collection)
+  const [supervisorVisits, setSupervisorVisits] = useState([]);
+  const [complaints, setComplaints] = useState([]);
+  const [spPharmacy, setSpPharmacy] = useState('');
+  const [spNotes, setSpNotes] = useState('');
+  const [spRating, setSpRating] = useState(0);
+  const [spRatingReason, setSpRatingReason] = useState('');
+  const [spPhoto, setSpPhoto] = useState(null);
+  const [spSubmitting, setSpSubmitting] = useState(false);
+  const [spJustSubmitted, setSpJustSubmitted] = useState(false);
+  const [spErrors, setSpErrors] = useState({});
+  const [spSearch, setSpSearch] = useState('');
 
   const now = useNow();
 
@@ -164,12 +689,40 @@ export default function PharmaTrack() {
     }
   }, []);
 
+  const loadSupervisorVisits = useCallback(async () => {
+    try {
+      const q = query(collection(db, SUPERVISOR_VISITS_COL), orderBy('timestamp', 'desc'));
+      const snap = await getDocs(q);
+      setSupervisorVisits(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (e) {
+      try {
+        const snap = await getDocs(collection(db, SUPERVISOR_VISITS_COL));
+        setSupervisorVisits(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
+      } catch (e2) { setSupervisorVisits([]); }
+    }
+  }, []);
+
+  const loadComplaints = useCallback(async () => {
+    try {
+      const q = query(collection(db, COMPLAINTS_COL), orderBy('timestamp', 'desc'));
+      const snap = await getDocs(q);
+      setComplaints(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (e) {
+      try {
+        const snap = await getDocs(collection(db, COMPLAINTS_COL));
+        setComplaints(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
+      } catch (e2) { setComplaints([]); }
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       const emps = await loadEmployees();
       await loadPharmacies();
       await loadVisits();
       await loadExpenses();
+      await loadSupervisorVisits();
+      await loadComplaints();
       try {
         const saved = sessionStorage.getItem(SESSION_KEY);
         if (saved) {
@@ -182,13 +735,14 @@ export default function PharmaTrack() {
       } catch (e) {}
       setBooting(false);
     })();
-  }, [loadEmployees, loadPharmacies, loadVisits, loadExpenses]);
+  }, [loadEmployees, loadPharmacies, loadVisits, loadExpenses, loadSupervisorVisits, loadComplaints]);
 
   function defaultScreenFor(role) {
     if (role === 'owner') return 'owner_home';
     if (role === 'admin') return 'admin_visits';
     if (role === 'supervisor') return 'supervisor_visits';
     if (role === 'manager') return 'manager_visits';
+    if (role === 'store_employee') return 'training';
     return 'report';
   }
 
@@ -252,6 +806,41 @@ export default function PharmaTrack() {
     } finally { setSubmitting(false); }
   };
 
+  const validateSupervisorReport = () => {
+    const errs = {};
+    if (!spPharmacy.trim()) errs.pharmacy = 'اختار الصيدلية';
+    if (!spNotes.trim()) errs.notes = 'الملاحظات مطلوبة';
+    if (!spRating) errs.rating = 'قيّم الصيدلية من 1 إلى 10';
+    if (!spRatingReason.trim()) errs.ratingReason = 'اذكر سبب التقييم';
+    setSpErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const handleSupervisorSubmit = async () => {
+    if (!validateSupervisorReport()) return;
+    setSpSubmitting(true);
+    const visit = {
+      pharmacy: spPharmacy.trim(),
+      notes: spNotes.trim(),
+      rating: spRating,
+      ratingReason: spRatingReason.trim(),
+      photo: spPhoto ? spPhoto.dataUrl : null,
+      supervisorName: currentUser.name,
+      timestamp: Date.now(),
+      dateLabel: formatDate(new Date()),
+      timeLabel: formatTime(new Date()),
+    };
+    try {
+      await addDoc(collection(db, SUPERVISOR_VISITS_COL), visit);
+      await loadSupervisorVisits();
+      setSpJustSubmitted(true);
+      setSpPharmacy(''); setSpNotes(''); setSpPhoto(null); setSpRating(0); setSpRatingReason('');
+      setTimeout(() => { setSpJustSubmitted(false); setScreen('supervisor_my_visits'); }, 900);
+    } catch (e) {
+      setSpErrors({ submit: 'صار خطأ بالحفظ، جرب مرة ثانية' });
+    } finally { setSpSubmitting(false); }
+  };
+
   const togglePharmacyInNew = (name) => {
     setNewPharmacies(list => list.includes(name) ? list.filter(p => p !== name) : [...list, name]);
   };
@@ -264,8 +853,8 @@ export default function PharmaTrack() {
     if (employees.some(e => e.username.toLowerCase() === newUser.trim().toLowerCase())) {
       setAdminMsg('اسم المستخدم هذا موجود مسبقاً'); return;
     }
-    if (newRole === 'manager' && newPharmacies.length !== 1) {
-      setAdminMsg('مدير الصيدلية لازم تختار له صيدلية وحدة بس'); return;
+    if ((newRole === 'manager' || newRole === 'store_employee') && newPharmacies.length !== 1) {
+      setAdminMsg('هذا الدور لازم تختارله صيدلية وحدة بس'); return;
     }
     if ((newRole === 'admin' || newRole === 'supervisor') && newPharmacies.length === 0) {
       setAdminMsg('اختار صيدلية وحدة على الأقل'); return;
@@ -307,6 +896,29 @@ export default function PharmaTrack() {
       setTimeout(() => { setResetTargetId(null); setResetMsg(''); }, 1200);
     } catch (e) {
       setResetMsg('صار خطأ، جرب مرة ثانية');
+    }
+  };
+
+  const handleTransfer = async (id) => {
+    setTransferMsg('');
+    if (!transferValue) { setTransferMsg('اختار الوجهة الجديدة'); return; }
+    const emp = employees.find(e => e.id === id);
+    if (!emp) return;
+    try {
+      let newPharmacies = emp.pharmacies || [];
+      if (emp.role === 'manager' || emp.role === 'store_employee') {
+        newPharmacies = [transferValue]; // transferValue = new pharmacy name
+      } else if (emp.role === 'supervisor') {
+        const targetAdmin = employees.find(a => a.id === transferValue && a.role === 'admin');
+        if (!targetAdmin) { setTransferMsg('اختار أدمن صحيح'); return; }
+        newPharmacies = targetAdmin.pharmacies || [];
+      }
+      await setDoc(doc(db, EMPLOYEES_COL, id), { ...emp, pharmacies: newPharmacies });
+      await loadEmployees();
+      setTransferMsg('تم النقل ✓');
+      setTimeout(() => { setTransferTargetId(null); setTransferMsg(''); setTransferValue(''); }, 1200);
+    } catch (e) {
+      setTransferMsg('صار خطأ، جرب مرة ثانية');
     }
   };
 
@@ -379,6 +991,40 @@ export default function PharmaTrack() {
     const d = new Date(v.timestamp); const n = new Date();
     return d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear();
   }).length;
+
+  // ---------- supervisor visit report visibility ----------
+  const visibleSupervisorVisits = (() => {
+    if (!currentUser) return [];
+    if (currentUser.role === 'owner') return supervisorVisits;
+    if (currentUser.role === 'admin') {
+      const phs = currentUser.pharmacies || [];
+      return supervisorVisits.filter(v => phs.includes(v.pharmacy));
+    }
+    if (currentUser.role === 'manager') {
+      const ph = (currentUser.pharmacies || [])[0];
+      return supervisorVisits.filter(v => v.pharmacy === ph);
+    }
+    if (currentUser.role === 'supervisor') {
+      return supervisorVisits.filter(v => v.supervisorName === currentUser.name);
+    }
+    return [];
+  })();
+  const filteredSupervisorVisits = visibleSupervisorVisits.filter(v => (v.pharmacy || '').toLowerCase().includes(spSearch.toLowerCase()));
+
+  // ---------- complaint visibility ----------
+  const visibleComplaints = (() => {
+    if (!currentUser) return [];
+    if (currentUser.role === 'owner') return complaints;
+    if (currentUser.role === 'admin' || currentUser.role === 'supervisor') {
+      const phs = currentUser.pharmacies || [];
+      return complaints.filter(c => phs.includes(c.pharmacy));
+    }
+    if (currentUser.role === 'manager') {
+      const ph = (currentUser.pharmacies || [])[0];
+      return complaints.filter(c => c.pharmacy === ph);
+    }
+    return [];
+  })();
 
   const analyticsByEmployee = (() => {
     const map = {};
@@ -496,11 +1142,25 @@ export default function PharmaTrack() {
         </div>
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
+        <button onClick={() => setScreen('training')} style={styles.iconBtn} title="التدريب"><GraduationCap size={15} /></button>
         {backTo && <button onClick={() => setScreen(backTo)} style={styles.newBtn}>رجوع</button>}
         <button onClick={handleLogout} style={styles.iconBtn}><LogOut size={15} /></button>
       </div>
     </div>
   );
+
+  // ================= TRAINING (added) =================
+  if (screen === 'training') {
+    return (
+      <div dir="rtl" style={styles.page}>
+        <style>{globalCss}</style>
+        <div style={styles.shell}>
+          <HeaderBar title="التدريب" icon="🎓" backTo={role === 'store_employee' ? null : defaultScreenFor(role)} />
+          <TrainingScreen currentUser={currentUser} role={role} employees={employees} />
+        </div>
+      </div>
+    );
+  }
 
   // ================= OWNER HOME =================
   if (screen === 'owner_home') {
@@ -510,6 +1170,8 @@ export default function PharmaTrack() {
       { key: 'owner_report', icon: <FileBarChart size={20} />, label: 'تقرير بفترة زمنية', sub: 'أسبوعي / شهري' },
       { key: 'admin', icon: <Users size={20} />, label: 'إدارة الحسابات', sub: `${employees.length} حساب` },
       { key: 'owner_pharmacies', icon: <Building2 size={20} />, label: 'إدارة الصيدليات', sub: `${pharmacies.length} صيدلية` },
+      { key: 'training', icon: <GraduationCap size={20} />, label: 'التدريب', sub: 'مسار الموظفين' },
+      { key: 'complaints_view', icon: <AlertTriangle size={20} />, label: 'شكاوى الموظفين', sub: `${complaints.length} شكوى` },
     ];
     return (
       <div dir="rtl" style={styles.page}>
@@ -575,6 +1237,19 @@ export default function PharmaTrack() {
                   </div>
                 ))}
               </div>
+            )}
+            {(role === 'admin' || role === 'supervisor') && (
+              <button onClick={() => setScreen('complaints_view')} style={styles.linkBtn}>
+                شكاوى الموظفين ({visibleComplaints.length})
+              </button>
+            )}
+            {role === 'supervisor' && (
+              <>
+                <button onClick={() => setScreen('supervisor_report')} style={styles.linkBtn}>+ تقرير زيارة جديد (بصفتي HR)</button>
+                <button onClick={() => setScreen('supervisor_my_visits')} style={styles.linkBtn}>
+                  تقاريري كـ HR ({supervisorVisits.filter(v => v.supervisorName === currentUser.name).length})
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -740,16 +1415,17 @@ export default function PharmaTrack() {
             <label style={styles.label}>نوع الحساب</label>
             <select style={styles.input} value={newRole} onChange={(e) => { setNewRole(e.target.value); setNewPharmacies([]); }}>
               <option value="employee">موظف ميداني (يسجل زيارات)</option>
+              <option value="store_employee">موظف صيدلية (تدريب فقط)</option>
               <option value="manager">مدير صيدلية (فيور + مصاريف لصيدلية وحدة)</option>
-              <option value="supervisor">مشرف (يتابع عدة صيدليات)</option>
+              <option value="supervisor">HR (يتابع عدة صيدليات)</option>
               <option value="admin">ادمن (يتابع صيدليات + تقارير)</option>
               <option value="owner">اونر (صلاحية كاملة)</option>
             </select>
 
-            {(newRole === 'manager' || newRole === 'supervisor' || newRole === 'admin') && (
+            {(newRole === 'manager' || newRole === 'supervisor' || newRole === 'admin' || newRole === 'store_employee') && (
               <>
                 <label style={styles.label}>
-                  {newRole === 'manager' ? 'اختار صيدلية واحدة' : 'اختار الصيدليات (يقدر يشوفها)'}
+                  {(newRole === 'manager' || newRole === 'store_employee') ? 'اختار صيدلية واحدة' : 'اختار الصيدليات (يقدر يشوفها)'}
                 </label>
                 {pharmacies.length === 0 ? (
                   <div style={{ fontSize: 12.5, color: '#8a948d' }}>ما اكو صيدليات مضافة بعد — روح لـ "إدارة الصيدليات" أول</div>
@@ -758,11 +1434,11 @@ export default function PharmaTrack() {
                     {pharmacies.map(ph => (
                       <label key={ph.id} style={styles.checkRow}>
                         <input
-                          type={newRole === 'manager' ? 'radio' : 'checkbox'}
+                          type={(newRole === 'manager' || newRole === 'store_employee') ? 'radio' : 'checkbox'}
                           name="ph-select"
                           checked={newPharmacies.includes(ph.name)}
                           onChange={() => {
-                            if (newRole === 'manager') setNewPharmacies([ph.name]);
+                            if (newRole === 'manager' || newRole === 'store_employee') setNewPharmacies([ph.name]);
                             else togglePharmacyInNew(ph.name);
                           }}
                         />
@@ -793,6 +1469,15 @@ export default function PharmaTrack() {
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: 4 }}>
+                      {(emp.role === 'manager' || emp.role === 'store_employee' || emp.role === 'supervisor') && (
+                        <button
+                          onClick={() => { setTransferTargetId(transferTargetId === emp.id ? null : emp.id); setTransferValue(''); setTransferMsg(''); }}
+                          style={styles.resetBtn}
+                          title="نقل الحساب"
+                        >
+                          <Building2 size={14} />
+                        </button>
+                      )}
                       <button
                         onClick={() => { setResetTargetId(resetTargetId === emp.id ? null : emp.id); setResetPassValue(''); setResetMsg(''); }}
                         style={styles.resetBtn}
@@ -804,6 +1489,41 @@ export default function PharmaTrack() {
                       )}
                     </div>
                   </div>
+                  {transferTargetId === emp.id && (
+                    <div style={styles.resetPanel}>
+                      {emp.role === 'supervisor' ? (
+                        <>
+                          <label style={{ ...styles.label, marginTop: 8 }}>انقل {emp.name} ليتبع أدمن آخر</label>
+                          {employees.filter(a => a.role === 'admin').length === 0 ? (
+                            <div style={{ fontSize: 12.5, color: '#8a948d' }}>ما اكو حسابات أدمن بعد</div>
+                          ) : (
+                            <select style={styles.input} value={transferValue} onChange={(e) => setTransferValue(e.target.value)}>
+                              <option value="">-- اختار الأدمن --</option>
+                              {employees.filter(a => a.role === 'admin').map(a => (
+                                <option key={a.id} value={a.id}>{a.name} ({(a.pharmacies || []).join('، ') || 'بدون صيدليات'})</option>
+                              ))}
+                            </select>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <label style={{ ...styles.label, marginTop: 8 }}>انقل {emp.name} لصيدلية أخرى</label>
+                          {pharmacies.length === 0 ? (
+                            <div style={{ fontSize: 12.5, color: '#8a948d' }}>ما اكو صيدليات مضافة بعد</div>
+                          ) : (
+                            <select style={styles.input} value={transferValue} onChange={(e) => setTransferValue(e.target.value)}>
+                              <option value="">-- اختار الصيدلية الجديدة --</option>
+                              {pharmacies.map(ph => <option key={ph.id} value={ph.name}>{ph.name}</option>)}
+                            </select>
+                          )}
+                        </>
+                      )}
+                      {transferMsg && <div style={{ ...styles.errText, color: transferMsg.includes('✓') ? '#1f7a4d' : '#c0392b' }}>{transferMsg}</div>}
+                      <button className="btn-primary" style={{ ...styles.submitBtn, marginTop: 10 }} onClick={() => handleTransfer(emp.id)}>
+                        تأكيد النقل
+                      </button>
+                    </div>
+                  )}
                   {resetTargetId === emp.id && (
                     <div style={styles.resetPanel}>
                       <label style={{ ...styles.label, marginTop: 8 }}>كلمة مرور جديدة لـ {emp.name}</label>
@@ -844,6 +1564,7 @@ export default function PharmaTrack() {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => setScreen('training')} style={styles.iconBtn} title="التدريب"><GraduationCap size={15} /></button>
               <button onClick={() => setScreen('manager_expenses')} style={styles.iconBtn}><Wallet size={15} /></button>
               <button onClick={handleLogout} style={styles.iconBtn}><LogOut size={15} /></button>
             </div>
@@ -874,6 +1595,12 @@ export default function PharmaTrack() {
               </div>
             )}
             <button onClick={() => setScreen('manager_expenses')} style={styles.linkBtn}><Receipt size={14} style={{ verticalAlign: 'middle', marginLeft: 4 }} /> إدارة المصاريف</button>
+            <button onClick={() => setScreen('manager_supervisor_visits')} style={styles.linkBtn}>
+              تقارير زيارة HR لصيدليتي ({supervisorVisits.filter(v => v.pharmacy === (currentUser.pharmacies || [])[0]).length})
+            </button>
+            <button onClick={() => setScreen('complaints_view')} style={styles.linkBtn}>
+              شكاوى موظفين صيدليتي ({visibleComplaints.length})
+            </button>
           </div>
         </div>
       </div>
@@ -955,6 +1682,186 @@ export default function PharmaTrack() {
     );
   }
 
+  // ================= COMPLAINTS (owner / admin / HR / manager) =================
+  if (screen === 'complaints_view') {
+    return (
+      <div dir="rtl" style={styles.page}>
+        <style>{globalCss}</style>
+        <div style={styles.shell}>
+          <HeaderBar title="شكاوى الموظفين" icon="📮" backTo={defaultScreenFor(role)} />
+          <div style={{ padding: '18px 20px 40px' }}>
+            {visibleComplaints.length === 0 ? (
+              <div style={styles.emptyState}>ما اكو شكاوى مسجلة بعد</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {visibleComplaints.map(c => (
+                  <div key={c.id} style={styles.analyticsVisitRow}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <div style={{ fontWeight: 700, fontSize: 13.5, color: '#1f2d26' }}>{c.employeeName}</div>
+                      <div style={{ fontSize: 11, color: '#8a948d' }}>{c.pharmacy}</div>
+                    </div>
+                    <div style={{ fontSize: 11, color: '#8a948d', marginTop: 2 }}>{c.dateLabel} · {c.timeLabel}</div>
+                    <div style={{ fontSize: 13, color: '#3a4a41', marginTop: 8, lineHeight: 1.7 }}>{c.text}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ================= SUPERVISOR: NEW VISIT REPORT =================
+  if (screen === 'supervisor_report') {
+    return (
+      <div dir="rtl" style={styles.page}>
+        <style>{globalCss}</style>
+        <div style={styles.shell}>
+          <HeaderBar title="تقرير زيارة (HR)" icon="🧭" backTo="supervisor_visits" />
+          <div style={{ padding: '0 20px 100px' }}>
+            <label style={styles.label}><MapPin size={14} /> اسم الصيدلية</label>
+            <select
+              style={{ ...styles.input, ...(spErrors.pharmacy ? styles.inputError : {}) }}
+              value={spPharmacy}
+              onChange={(e) => { setSpPharmacy(e.target.value); setSpErrors(er => ({ ...er, pharmacy: null })); }}
+            >
+              <option value="">-- اختار الصيدلية --</option>
+              {(currentUser.pharmacies || []).map(ph => <option key={ph} value={ph}>{ph}</option>)}
+            </select>
+            {spErrors.pharmacy && <div style={styles.errText}>{spErrors.pharmacy}</div>}
+
+            <label style={styles.label}><Star size={14} /> تقييم الصيدلية (من 1 إلى 10)</label>
+            <div style={styles.starsRow}>
+              {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+                <button key={n} type="button" onClick={() => { setSpRating(n); setSpErrors(er => ({ ...er, rating: null })); }} style={styles.starBtn}>
+                  <Star size={20} fill={n <= spRating ? '#e8a33d' : 'none'} color={n <= spRating ? '#e8a33d' : '#c9d1cb'} />
+                </button>
+              ))}
+              <span style={styles.ratingNum}>{spRating ? `${spRating}/10` : ''}</span>
+            </div>
+            {spErrors.rating && <div style={styles.errText}>{spErrors.rating}</div>}
+
+            <label style={styles.label}><FileText size={14} /> سبب التقييم</label>
+            <textarea
+              style={{ ...styles.textarea, ...(spErrors.ratingReason ? styles.inputError : {}) }}
+              placeholder="ليش اعطيت هذا التقييم؟"
+              value={spRatingReason}
+              onChange={(e) => { setSpRatingReason(e.target.value); setSpErrors(er => ({ ...er, ratingReason: null })); }}
+              rows={2}
+            />
+            {spErrors.ratingReason && <div style={styles.errText}>{spErrors.ratingReason}</div>}
+
+            <label style={styles.label}><Camera size={14} /> صورة توثيقية (اختياري)</label>
+            {spPhoto ? (
+              <div style={styles.photoPreviewWrap}>
+                <img src={spPhoto.dataUrl} alt="" style={styles.photoPreview} />
+                <button onClick={() => setSpPhoto(null)} style={styles.photoRemove}><X size={14} /></button>
+              </div>
+            ) : (
+              <label className="photo-slot" style={styles.photoSlot}>
+                <Camera size={22} color="#2f6b57" />
+                <span style={{ fontSize: 13, color: '#5a6b62', marginTop: 6 }}>اضغط لإضافة صورة</span>
+                <input type="file" accept="image/*" onChange={handlePhotoChange(setSpPhoto)} style={{ display: 'none' }} />
+              </label>
+            )}
+
+            <label style={styles.label}><FileText size={14} /> ملاحظات الزيارة</label>
+            <textarea
+              style={{ ...styles.textarea, ...(spErrors.notes ? styles.inputError : {}) }}
+              placeholder="اكتب ملاحظاتك عن الزيارة..."
+              value={spNotes}
+              onChange={(e) => { setSpNotes(e.target.value); setSpErrors(er => ({ ...er, notes: null })); }}
+              rows={4}
+            />
+            {spErrors.notes && <div style={styles.errText}>{spErrors.notes}</div>}
+            {spErrors.submit && <div style={styles.errText}>{spErrors.submit}</div>}
+
+            <button className="btn-primary" style={{ ...styles.submitBtn, opacity: spSubmitting ? 0.75 : 1 }} onClick={handleSupervisorSubmit} disabled={spSubmitting}>
+              {spSubmitting ? (<><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> جاري الحفظ...</>) :
+                spJustSubmitted ? (<><CheckCircle2 size={16} /> تم الحفظ</>) : ('حفظ التقرير')}
+            </button>
+            <div style={styles.lockNote}>⚠️ بعد الحفظ، التقرير يصير نهائي وما يمكن تعديله</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ================= SUPERVISOR: MY VISIT REPORTS =================
+  if (screen === 'supervisor_my_visits') {
+    const mine = supervisorVisits.filter(v => v.supervisorName === currentUser.name && (v.pharmacy || '').toLowerCase().includes(spSearch.toLowerCase()));
+    return (
+      <div dir="rtl" style={styles.page}>
+        <style>{globalCss}</style>
+        <div style={styles.shell}>
+          <HeaderBar title="تقاريري كـ HR" icon="🧭" backTo="supervisor_visits" />
+          <div style={{ padding: '0 20px 40px' }}>
+            <div style={styles.searchWrap}>
+              <Search size={16} color="#8a948d" />
+              <input style={styles.searchInput} placeholder="ابحث باسم الصيدلية..." value={spSearch} onChange={(e) => setSpSearch(e.target.value)} />
+            </div>
+            {mine.length === 0 ? (
+              <div style={styles.emptyState}><div style={{ fontSize: 32, marginBottom: 8 }}>🕐</div><div>ما اكو تقارير زيارة مسجلة بعد</div></div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
+                {mine.map((v, i) => (
+                  <div className="visit-card" key={v.id} style={{ ...styles.visitCard, animationDelay: `${i * 0.03}s` }}>
+                    {v.photo ? <img src={v.photo} alt="" style={styles.visitThumb} /> : <div style={styles.visitThumbPlaceholder}>💊</div>}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={styles.visitPharmacy}>{v.pharmacy}</div>
+                        {v.rating ? <div style={styles.ratingPillSmall}><Star size={10} fill="#e8a33d" color="#e8a33d" /> {v.rating}/10</div> : null}
+                      </div>
+                      <div style={styles.visitMeta}>{v.dateLabel} · {v.timeLabel}</div>
+                      {v.notes && <div style={styles.visitNotes}>{v.notes}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button onClick={() => setScreen('supervisor_report')} style={styles.linkBtn}>+ تقرير زيارة جديد</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ================= MANAGER: SUPERVISOR VISIT REPORTS FOR MY PHARMACY =================
+  if (screen === 'manager_supervisor_visits') {
+    const myPh = (currentUser.pharmacies || [])[0];
+    const list = supervisorVisits.filter(v => v.pharmacy === myPh);
+    return (
+      <div dir="rtl" style={styles.page}>
+        <style>{globalCss}</style>
+        <div style={styles.shell}>
+          <HeaderBar title="تقارير زيارة HR" icon="🧭" backTo="manager_visits" />
+          <div style={{ padding: '0 20px 40px' }}>
+            {list.length === 0 ? (
+              <div style={styles.emptyState}>ما اكو تقارير زيارة من HR لهذي الصيدلية بعد</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
+                {list.map((v, i) => (
+                  <div className="visit-card" key={v.id} style={{ ...styles.visitCard, animationDelay: `${i * 0.03}s` }}>
+                    {v.photo ? <img src={v.photo} alt="" style={styles.visitThumb} /> : <div style={styles.visitThumbPlaceholder}>💊</div>}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={styles.visitPharmacy}>{v.supervisorName}</div>
+                        {v.rating ? <div style={styles.ratingPillSmall}><Star size={10} fill="#e8a33d" color="#e8a33d" /> {v.rating}/10</div> : null}
+                      </div>
+                      <div style={styles.visitMeta}>{v.dateLabel} · {v.timeLabel}</div>
+                      {v.notes && <div style={styles.visitNotes}>{v.notes}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ================= ADMIN: header extra button to report =================
   // (admin_visits handled above alongside owner_visits/supervisor_visits)
 
@@ -972,6 +1879,7 @@ export default function PharmaTrack() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={() => setScreen('training')} style={styles.iconBtn} title="التدريب"><GraduationCap size={15} /></button>
             <button onClick={handleLogout} style={styles.iconBtn}><LogOut size={15} /></button>
           </div>
         </div>
